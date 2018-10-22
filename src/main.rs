@@ -6,10 +6,11 @@ extern crate sha1;
 
 #[macro_use] extern crate serde_derive;
 
+use std::cmp;
 use std::env;
 use std::fmt::Write;
 use std::fs::File as FsFile;
-use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::mem;
 use std::sync::mpsc;
 
@@ -103,38 +104,36 @@ fn compute_piece_hash(files: &[FileIndex]) -> Result<[u8; 20], io::Error> {
 
     // Offset the read bytes to the start of the part of the file we actually
     // care about
-    let mut read_bytes = *start;
+    let mut read_counter = *start;
 
     let mut fd = FsFile::open(path.join("/"))?;
-    if read_bytes > 0 {
-      fd.seek(SeekFrom::Start(read_bytes as u64))?;
+    if read_counter > 0 {
+      fd.seek(SeekFrom::Start(read_counter as u64))?;
     }
 
-    let mut reader = BufReader::with_capacity(64 * 1024, fd);
+    const BUFFER_LENGTH: usize = 64 * 1024;
+    let mut buffer = [0; BUFFER_LENGTH];
+
     loop {
-      let new_read_bytes = {
-        let buffer = reader.fill_buf()?;
-        //println!("read (buffer len: {:?}, read_bytes: {:?})", buffer.len(), read_bytes);
+      let request_amount = cmp::min(BUFFER_LENGTH, *end - read_counter);
+      let read_amount = fd.read(&mut buffer[..request_amount])?;
+      //println!("read (num: {:?}, read_bytes: {:?})", num, read_bytes);
 
-        if buffer.len() == 0 {
-          break;
-        }
+      if read_amount == 0 {
+        break;
+      }
 
-        if read_bytes + buffer.len() >= *end {
-          //println!("hit end (read_bytes: {}, buffer len: {}, read_bytes + buffer len = {})", read_bytes, buffer.len(), read_bytes + buffer.len());
-          let remaining = end - read_bytes;
-          hasher.update(&buffer[0..remaining]);
+      if read_counter + read_amount >= *end {
+        //println!("hit end (read_bytes: {}, buffer len: {}, read_bytes + buffer len = {})", read_bytes, buffer.len(), read_bytes + buffer.len());
+        let remaining = end - read_counter;
+        hasher.update(&buffer[0..remaining]);
 
-          break;
-        } else {
-          hasher.update(buffer);
+        break;
+      } else {
+        hasher.update(&buffer);
 
-          read_bytes += buffer.len();
-          buffer.len()
-        }
-      };
-
-      reader.consume(new_read_bytes);
+        read_counter += read_amount;
+      }
     }
   }
 
