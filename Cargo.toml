@@ -1,0 +1,13 @@
+[package]
+name = "check_torrent"
+version = "0.1.0"
+authors = ["Matt Bilker <me@mbilker.us>"]
+edition = "2018"
+
+[dependencies]
+rayon = "1.0.2"
+serde = "1.0.72"
+serde_bencode = "0.2.0"
+serde_bytes = "0.10.0"
+serde_derive = "1.0.72"
+sha1 = "0.6.0"
