@@ -8,7 +8,7 @@ extern crate sha1;
 
 use std::cmp;
 use std::env;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::fs::File as FsFile;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::mem;
@@ -32,12 +32,32 @@ enum PieceFileType {
   Partial,
 }
 
-#[derive(Debug)]
 struct FileIndex<'a> {
   path: &'a [String],
   start: usize,
   end: usize,
   end_type: PieceFileType,
+}
+
+impl<'a> fmt::Debug for FileIndex<'a> {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    writeln!(f, "FileIndex {{")?;
+    write!(f, "  path: ")?;
+    for (i, part) in self.path.iter().enumerate() {
+      if i != 0 {
+        f.write_str("/")?;
+      }
+      f.write_str(part)?;
+    }
+    writeln!(f, ",")?;
+    write!(f, r#"  start: {start},
+  end: {end},
+  end_type: {end_type:?}
+}}"#,
+      start = self.start,
+      end = self.end,
+      end_type = self.end_type)
+  }
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,7 +146,7 @@ fn compute_piece_hash(files: &[FileIndex]) -> Result<[u8; 20], io::Error> {
       if read_counter + read_amount >= *end {
         //println!("hit end (read_bytes: {}, buffer len: {}, read_bytes + buffer len = {})", read_bytes, buffer.len(), read_bytes + buffer.len());
         let remaining = end - read_counter;
-        hasher.update(&buffer[0..remaining]);
+        hasher.update(&buffer[..remaining]);
 
         break;
       } else {
