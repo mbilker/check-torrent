@@ -441,19 +441,16 @@ fn render_torrent(torrent: &Torrent) -> Fallible<()> {
   println!("md5sum:\t\t{:?}", torrent.info.md5sum);
   println!("path:\t\t{:?}", torrent.info.path);
 
-  println!("pieces.len(): {}", torrent.info.pieces.len());
-
   // Each piece is a 160-bit SHA-1 hash
   let count = torrent.info.pieces.chunks(20).count();
-  println!("pieces count: {}", count);
+  println!("piece buffer length: {}", torrent.info.pieces.len());
+  println!("pieces count:        {}", count);
 
   if let &Some(ref files) = &torrent.info.files {
     extra_files_check(files)?;
     files_existance_check(files)?;
 
     let piece_size = torrent.info.piece_length as usize;
-    println!("piece_size: {}", piece_size);
-
     files_hash_check(files, piece_size, &torrent.info.pieces)?;
   }
 
