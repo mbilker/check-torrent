@@ -28,7 +28,7 @@ use walkdir::{DirEntry, WalkDir};
 
 fn to_hex_string(data: &[u8]) -> String {
   data.iter().fold(String::with_capacity(data.len() * 2), |mut cur, new| {
-    write!(cur, "{:02x}", new);
+    write!(cur, "{:02x}", new).unwrap();
     cur
   })
 }
@@ -124,6 +124,9 @@ struct Torrent {
 }
 
 fn compute_piece_hash(files: &[FileIndex]) -> Fallible<[u8; 20]> {
+  const BUFFER_LENGTH: usize = 64 * 1024;
+
+  let mut buffer = [0; BUFFER_LENGTH];
   let mut hasher = Sha1::new();
 
   for FileIndex { path, start, end, .. } in files {
@@ -140,9 +143,6 @@ fn compute_piece_hash(files: &[FileIndex]) -> Fallible<[u8; 20]> {
         format!("Failed to seek to {} in '{}'", read_counter, path)
       })?;
     }
-
-    const BUFFER_LENGTH: usize = 64 * 1024;
-    let mut buffer = [0; BUFFER_LENGTH];
 
     loop {
       let request_amount = cmp::min(BUFFER_LENGTH, *end - read_counter);
@@ -201,6 +201,7 @@ fn files_existance_check(files: &[File]) -> Fallible<()> {
 
     if meta.len() != f.length as u64 {
       file_errors.push(format_err!("'{}' is not of size {} bytes", path, f.length));
+      //fs::remove_file(&path)?;
     }
   }
 
@@ -227,7 +228,7 @@ fn extra_files_check(files: &[File]) -> Fallible<()> {
     .into_iter()
     .filter_map(|e| e.ok())
     .filter(is_file);
-  let extra_files: Vec<_> = walker.filter_map(|entry| {
+  let mut extra_files: Vec<_> = walker.filter_map(|entry| {
     // Ignore the `Component::CurDir` part, only get the path components
     let components: Vec<_> = entry.path()
       .components()
@@ -270,10 +271,12 @@ fn extra_files_check(files: &[File]) -> Fallible<()> {
     }
   }).collect();
 
+  extra_files.sort();
+
   if !extra_files.is_empty() {
     println!("Extra Files:");
     for file in extra_files {
-      println!("{:?}", file.as_path());
+      println!("{}", file.as_path().display());
     }
     println!();
   }
@@ -480,11 +483,9 @@ fn main() {
       for cause in e.iter_causes() {
         eprintln!("Caused by: {}", cause);
       }
-      if e.as_fail().cause().is_some() {
-        eprintln!();
-      }
 
       if let Some(backtrace) = e.as_fail().backtrace() {
+        eprintln!();
         eprintln!("Backtrace:");
         eprintln!("{}", backtrace);
       }
