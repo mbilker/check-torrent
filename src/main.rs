@@ -67,59 +67,38 @@ impl<'a> fmt::Debug for FileIndex<'a> {
   }
 }
 
-#[derive(Debug, Deserialize)]
-struct Node(String, i64);
-
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct File {
   path: Vec<String>,
   length: i64,
-  #[serde(default)]
-  md5sum: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct Info {
   name: String,
   pieces: ByteBuf,
-  #[serde(rename="piece length")]
+  #[serde(rename = "piece length")]
   piece_length: i64,
-  #[serde(default)]
-  md5sum: Option<String>,
-  #[serde(default)]
-  length: Option<i64>,
   #[serde(default)]
   files: Option<Vec<File>>,
   #[serde(default)]
   private: Option<u8>,
   #[serde(default)]
   path: Option<Vec<String>>,
-  #[serde(default)]
-  #[serde(rename="root hash")]
+  #[serde(default, rename = "root hash")]
   root_hash: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct Torrent {
   info: Info,
   #[serde(default)]
-  announce: Option<String>,
-  #[serde(default)]
-  nodes: Option<Vec<Node>>,
-  #[serde(default)]
   encoding: Option<String>,
-  #[serde(default)]
-  httpseeds: Option<Vec<String>>,
-  #[serde(default)]
-  #[serde(rename="announce-list")]
-  announce_list: Option<Vec<Vec<String>>>,
-  #[serde(default)]
-  #[serde(rename="creation date")]
+  #[serde(default, rename = "creation date")]
   creation_date: Option<i64>,
-  #[serde(rename="comment")]
+  #[serde(rename = "comment")]
   comment: Option<String>,
-  #[serde(default)]
-  #[serde(rename="created by")]
+  #[serde(default, rename = "created by")]
   created_by: Option<String>,
 }
 
@@ -426,14 +405,6 @@ fn files_hash_check(files: &[File], piece_size: usize, pieces: &[u8]) -> Fallibl
 
 fn render_torrent(torrent: &Torrent) -> Fallible<()> {
   println!("name:\t\t{}", torrent.info.name);
-  println!("announce:\t{:?}", torrent.announce);
-  println!("nodes:\t\t{:?}", torrent.nodes);
-  if let &Some(ref al) = &torrent.announce_list {
-    for a in al {
-      println!("announce list:\t{}", a[0]);
-    }
-  }
-  println!("httpseeds:\t{:?}", torrent.httpseeds);
   println!("creation date:\t{:?}", torrent.creation_date);
   println!("comment:\t{:?}", torrent.comment);
   println!("created by:\t{:?}", torrent.created_by);
@@ -441,7 +412,6 @@ fn render_torrent(torrent: &Torrent) -> Fallible<()> {
   println!("piece length:\t{:?}", torrent.info.piece_length);
   println!("private:\t{:?}", torrent.info.private);
   println!("root hash:\t{:?}", torrent.info.root_hash);
-  println!("md5sum:\t\t{:?}", torrent.info.md5sum);
   println!("path:\t\t{:?}", torrent.info.path);
 
   // Each piece is a 160-bit SHA-1 hash
