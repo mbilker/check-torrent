@@ -1,6 +1,6 @@
 [package]
 name = "check_torrent"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Matt Bilker <me@mbilker.us>"]
 edition = "2018"
 
