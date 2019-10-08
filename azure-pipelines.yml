@@ -1,0 +1,14 @@
+---
+trigger:
+- master
+
+pool:
+  vmImage: 'windows-latest'
+
+steps:
+- displayName: 'Install Rust toolchain'
+  script: 'choco install rust-ms'
+- displayName: 'Check for errors'
+  script: 'cargo check'
+- displayName: 'Build in release mode'
+  script: 'cargo build --release'
