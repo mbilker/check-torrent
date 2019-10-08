@@ -412,12 +412,10 @@ fn render_torrent(torrent: &Torrent) -> Fallible<()> {
   Ok(())
 }
 
-fn check_torrent_file(should_check: bool, path: &str) -> Fallible<()> {
-  let mut buffer = Vec::new();
-  let mut fd = FsFile::open(path)?;
-  fd.read_to_end(&mut buffer)?;
-
+fn check_torrent_file(path: &str, should_check: bool) -> Fallible<()> {
+  let buffer = fs::read(path).context("Failed to read torrent file")?;
   let torrent = de::from_bytes::<Torrent>(&buffer)?;
+
   println!("name:\t\t{}", torrent.info.name);
   println!("creation date:\t{:?}", torrent.creation_date);
   println!("comment:\t{:?}", torrent.comment);
@@ -449,7 +447,7 @@ fn main() {
   let should_check = !matches.is_present("no_check");
   let torrent_file = matches.value_of("file").unwrap();
 
-  if let Err(e) = check_torrent_file(should_check, torrent_file) {
+  if let Err(e) = check_torrent_file(torrent_file, should_check) {
     eprintln!("An error occurred while checking '{}':", torrent_file);
     eprintln!("  {}", e);
     eprintln!();
