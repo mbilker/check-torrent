@@ -8,7 +8,21 @@ pool:
 steps:
 - script: 'choco install rust-ms'
   displayName: 'Install Rust toolchain'
+
 - script: 'cargo check'
   displayName: 'Check for errors'
+
 - script: 'cargo build --release'
   displayName: 'Build in release mode'
+
+- task: CopyFiles@2
+  displayName: 'Copy build artifacts to staging directory'
+  inputs:
+    sourceFolder: '$(Build.SourcesDirectory)/target/release'
+    contents: '?(*.exe|*.dll|*.pdb)'
+    targetFolder: '$(Build.ArtifactStagingDirectory)'
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    pathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    artifactName: 'release'
