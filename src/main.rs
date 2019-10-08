@@ -1,15 +1,7 @@
-extern crate indicatif;
-extern crate rayon;
-extern crate serde;
-extern crate serde_bencode;
-extern crate serde_bytes;
-extern crate sha1;
-
 #[macro_use] extern crate failure;
 #[macro_use] extern crate serde_derive;
 
 use std::cmp;
-use std::env;
 use std::ffi::OsStr;
 use std::fmt::{self, Write};
 use std::fs::{self, File as FsFile};
@@ -18,6 +10,7 @@ use std::mem;
 use std::path::Component;
 use std::sync::mpsc;
 
+use clap::{App, Arg};
 use failure::{Error, Fallible, ResultExt};
 use indicatif::ProgressBar;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -180,7 +173,6 @@ fn files_existance_check(files: &[File]) -> Fallible<()> {
 
     if meta.len() != f.length as u64 {
       file_errors.push(format_err!("'{}' is not of size {} bytes", path, f.length));
-      //fs::remove_file(&path)?;
     }
   }
 
@@ -374,8 +366,8 @@ fn files_hash_check(files: &[File], piece_size: usize, pieces: &[u8]) -> Fallibl
           to_hex_string(piece)));
 
         s.send((piece, files, computed_hash)).unwrap();
-      } else {
-        bar.set_message(&format!("Hash correct for piece #{} ({})", i, to_hex_string(piece)));
+      //} else {
+        //bar.set_message(&format!("Hash correct for piece #{} ({})", i, to_hex_string(piece)));
       }
       Ok(())
     })?;
@@ -404,16 +396,6 @@ fn files_hash_check(files: &[File], piece_size: usize, pieces: &[u8]) -> Fallibl
 }
 
 fn render_torrent(torrent: &Torrent) -> Fallible<()> {
-  println!("name:\t\t{}", torrent.info.name);
-  println!("creation date:\t{:?}", torrent.creation_date);
-  println!("comment:\t{:?}", torrent.comment);
-  println!("created by:\t{:?}", torrent.created_by);
-  println!("encoding:\t{:?}", torrent.encoding);
-  println!("piece length:\t{:?}", torrent.info.piece_length);
-  println!("private:\t{:?}", torrent.info.private);
-  println!("root hash:\t{:?}", torrent.info.root_hash);
-  println!("path:\t\t{:?}", torrent.info.path);
-
   // Each piece is a 160-bit SHA-1 hash
   let count = torrent.info.pieces.chunks(20).count();
   println!("piece buffer length: {}", torrent.info.pieces.len());
@@ -430,35 +412,56 @@ fn render_torrent(torrent: &Torrent) -> Fallible<()> {
   Ok(())
 }
 
-fn check_torrent_file(path: &str) -> Fallible<()> {
+fn check_torrent_file(should_check: bool, path: &str) -> Fallible<()> {
   let mut buffer = Vec::new();
   let mut fd = FsFile::open(path)?;
   fd.read_to_end(&mut buffer)?;
 
-  match de::from_bytes::<Torrent>(&buffer) {
-    Ok(t) => render_torrent(&t)?,
-    Err(e) => eprintln!("Error parsing torrent file: {:?}", e),
-  };
+  let torrent = de::from_bytes::<Torrent>(&buffer)?;
+  println!("name:\t\t{}", torrent.info.name);
+  println!("creation date:\t{:?}", torrent.creation_date);
+  println!("comment:\t{:?}", torrent.comment);
+  println!("created by:\t{:?}", torrent.created_by);
+  println!("encoding:\t{:?}", torrent.encoding);
+  println!("piece length:\t{:?}", torrent.info.piece_length);
+  println!("private:\t{:?}", torrent.info.private);
+  println!("root hash:\t{:?}", torrent.info.root_hash);
+  println!("path:\t\t{:?}", torrent.info.path);
+
+  if should_check {
+    render_torrent(&torrent)?;
+  }
 
   Ok(())
 }
 
 fn main() {
-  if let Some(arg1) = env::args().nth(1) {
-    if let Err(e) = check_torrent_file(&arg1) {
-      eprintln!("An error occurred while checking {}:", arg1);
-      eprintln!("  {}", e);
+  let matches = App::new("Check Torrent")
+    .arg(Arg::with_name("no_check")
+      .short("n")
+      .long("no-check")
+      .help("Do not check the piece hashes, only print torrent metadata"))
+    .arg(Arg::with_name("file")
+      .index(1)
+      .required(true))
+    .get_matches();
+
+  let should_check = !matches.is_present("no_check");
+  let torrent_file = matches.value_of("file").unwrap();
+
+  if let Err(e) = check_torrent_file(should_check, torrent_file) {
+    eprintln!("An error occurred while checking '{}':", torrent_file);
+    eprintln!("  {}", e);
+    eprintln!();
+
+    for cause in e.iter_causes() {
+      eprintln!("Caused by: {}", cause);
+    }
+
+    if let Some(backtrace) = e.as_fail().backtrace() {
       eprintln!();
-
-      for cause in e.iter_causes() {
-        eprintln!("Caused by: {}", cause);
-      }
-
-      if let Some(backtrace) = e.as_fail().backtrace() {
-        eprintln!();
-        eprintln!("Backtrace:");
-        eprintln!("{}", backtrace);
-      }
+      eprintln!("Backtrace:");
+      eprintln!("{}", backtrace);
     }
   }
 }
