@@ -27,3 +27,9 @@ steps:
   inputs:
     pathtoPublish: '$(Build.ArtifactStagingDirectory)'
     artifactName: 'release'
+
+- task: GithubRelease@0
+  displayName: 'Create GitHub Release'
+  condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/')
+  inputs:
+    gitHubConnection: 'github'
