@@ -1,5 +1,5 @@
 #[macro_use]
-extern crate failure;
+extern crate anyhow;
 #[macro_use]
 extern crate serde_derive;
 
@@ -12,8 +12,8 @@ use std::mem;
 use std::path::Component;
 use std::sync::mpsc;
 
+use anyhow::{Context, Result};
 use clap::{App, Arg};
-use failure::{Error, Fallible, ResultExt};
 use indicatif::ProgressBar;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde_bencode::de;
@@ -101,32 +101,33 @@ struct Torrent {
     created_by: Option<String>,
 }
 
-fn compute_piece_hash(files: &[FileIndex]) -> Fallible<[u8; 20]> {
+fn compute_piece_hash<'a>(files: &[FileIndex<'a>]) -> Result<[u8; 20]> {
     const BUFFER_LENGTH: usize = 64 * 1024;
 
     let mut buffer = [0; BUFFER_LENGTH];
     let mut hasher = Sha1::new();
 
-    for FileIndex {
-        path, start, end, ..
-    } in files
-    {
+    for file in files {
+        let FileIndex {
+            path, start, end, ..
+        } = file;
+
         // Offset the read bytes to the start of the part of the file we actually
         // care about
         let mut read_counter = *start;
 
         let path = path.join("/");
-        let mut fd = FsFile::open(&path).with_context(|_| format!("Failed to open '{}'", path))?;
+        let mut fd = FsFile::open(&path).with_context(|| format!("Failed to open '{}'", path))?;
         if read_counter > 0 {
             fd.seek(SeekFrom::Start(read_counter as u64))
-                .with_context(|_| format!("Failed to seek to {} in '{}'", read_counter, path))?;
+                .with_context(|| format!("Failed to seek to {} in '{}'", read_counter, path))?;
         }
 
-        loop {
+        while read_counter < *end {
             let request_amount = cmp::min(BUFFER_LENGTH, *end - read_counter);
             let read_amount = fd
                 .read(&mut buffer[..request_amount])
-                .with_context(|_| format!("Failed to read from '{}'", path))?;
+                .with_context(|| format!("Failed to read from '{}'", path))?;
 
             if read_amount == 0 {
                 break;
@@ -150,35 +151,32 @@ fn compute_piece_hash(files: &[FileIndex]) -> Fallible<[u8; 20]> {
     //println!("digest: {:02x?}", digest.bytes());
     //println!("checking {} with {}", to_hex_string(&computed_hash), to_hex_string(piece_hash));
 
-    Ok(computed_hash)
+    Ok(digest.into())
 }
 
-fn files_existance_check(files: &[File]) -> Fallible<()> {
+fn files_existance_check(files: &[File]) -> Result<()> {
     let mut file_errors = Vec::new();
 
     for f in files {
         let path = f.path.join("/");
         let meta = match fs::metadata(&path) {
             Ok(v) => v,
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
+                file_errors.push(anyhow!("'{}' is missing", path));
+                continue;
+            },
             Err(e) => {
-                if e.kind() == io::ErrorKind::NotFound {
-                    file_errors.push(format_err!("'{}' is missing", path));
-                    continue;
-                }
-
-                return Err(Error::from_boxed_compat(Box::new(e))
-                    .context(format!("Failed to get the metadata of '{}'", path))
-                    .into());
-            }
+                return Err(e).context(format!("Failed to get the metadata of '{}'", path));
+            },
         };
 
         if !meta.is_file() {
-            file_errors.push(format_err!("'{}' is not a file", path));
+            file_errors.push(anyhow!("'{}' is not a file", path));
             continue;
         }
 
         if meta.len() != f.length as u64 {
-            file_errors.push(format_err!("'{}' is not of size {} bytes", path, f.length));
+            file_errors.push(anyhow!("'{}' is not of size {} bytes", path, f.length));
         }
     }
 
@@ -189,7 +187,7 @@ fn files_existance_check(files: &[File]) -> Fallible<()> {
         }
         println!();
 
-        Err(format_err!("Missing files or mismatched file sizes"))
+        Err(anyhow!("Missing files or mismatched file sizes"))
     } else {
         Ok(())
     }
@@ -199,7 +197,7 @@ fn is_file(entry: &DirEntry) -> bool {
     entry.metadata().unwrap().is_file()
 }
 
-fn extra_files_check(files: &[File]) -> Fallible<()> {
+fn extra_files_check(files: &[File]) -> Result<()> {
     let walker = WalkDir::new(".")
         .into_iter()
         .filter_map(|e| e.ok())
@@ -259,7 +257,7 @@ fn extra_files_check(files: &[File]) -> Fallible<()> {
     Ok(())
 }
 
-fn files_hash_check(files: &[File], piece_size: usize, pieces: &[u8]) -> Fallible<()> {
+fn files_hash_check(files: &[File], piece_size: usize, pieces: &[u8]) -> Result<()> {
     // Each piece is a 160-bit SHA-1 hash
     let mut pieces = pieces.chunks(20);
 
@@ -269,10 +267,6 @@ fn files_hash_check(files: &[File], piece_size: usize, pieces: &[u8]) -> Fallibl
     let mut read_bytes = 0;
 
     for f in files {
-        //println!("file path:\t{:?}", f.path);
-        //println!("file length:\t{}", f.length);
-        //println!("file md5sum:\t{:?}", f.md5sum);
-
         let file_length = f.length as usize;
 
         // Check if the file size will fill the current piece
@@ -310,8 +304,8 @@ fn files_hash_check(files: &[File], piece_size: usize, pieces: &[u8]) -> Fallibl
 
             let num_pieces = (file_length - start) / piece_size;
             for _ in 0..num_pieces {
-                let piece = pieces.next().ok_or_else(|| {
-                    format_err!("Piece for '{}' at {} not found", f.path.join("/"), start)
+                let piece = pieces.next().with_context(|| {
+                    format!("Piece for '{}' at {} not found", f.path.join("/"), start)
                 })?;
                 //println!("read piece: {:02x?}", piece);
 
@@ -342,7 +336,7 @@ fn files_hash_check(files: &[File], piece_size: usize, pieces: &[u8]) -> Fallibl
     }
 
     if pieces.next().is_some() {
-        return Err(format_err!("There should be no more pieces"));
+        return Err(anyhow!("There should be no more pieces"));
     }
 
     let mut all_ok = true;
@@ -351,34 +345,43 @@ fn files_hash_check(files: &[File], piece_size: usize, pieces: &[u8]) -> Fallibl
 
     bar.enable_steady_tick(10);
 
-    piece_files.par_iter().enumerate().try_for_each_with(
-        sender,
-        |s, (i, (piece, files))| -> Fallible<()> {
-            let computed_hash = match compute_piece_hash(files) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("Error processing {:#?}: {:?}", files, e);
-                    return Err(e);
-                }
-            };
+    fn check_handler<'data>(
+        sender: &mut mpsc::Sender<(&'data [u8], &'data [FileIndex<'data>], [u8; 20])>,
+        bar: &ProgressBar,
+        i: usize,
+        piece: &'data [u8],
+        files: &'data [FileIndex<'data>],
+    ) -> Result<()> {
+        let computed_hash = match compute_piece_hash(files) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Error processing {:#?}: {:?}", files, e);
+                return Err(e);
+            },
+        };
 
-            bar.inc(1);
+        bar.inc(1);
 
-            if computed_hash != *piece {
-                bar.set_message(&format!(
-                    "Hash mismatch! (#{}, digest: {:?}, piece: {:?})",
-                    i,
-                    to_hex_string(&computed_hash),
-                    to_hex_string(piece)
-                ));
+        if computed_hash != *piece {
+            bar.set_message(&format!(
+                "Hash mismatch! (#{}, digest: {:?}, piece: {:?})",
+                i,
+                to_hex_string(&computed_hash),
+                to_hex_string(piece)
+            ));
 
-                s.send((piece, files, computed_hash)).unwrap();
-                //} else {
-                //bar.set_message(&format!("Hash correct for piece #{} ({})", i, to_hex_string(piece)));
-            }
-            Ok(())
-        },
-    )?;
+            sender.send((piece, files, computed_hash)).unwrap();
+        }
+
+        Ok(())
+    }
+
+    piece_files
+        .par_iter()
+        .enumerate()
+        .try_for_each_with(sender, |sender, (i, (piece, files))| {
+            check_handler(sender, &bar, i, piece, files)
+        })?;
 
     bar.finish_and_clear();
 
@@ -409,7 +412,7 @@ fn files_hash_check(files: &[File], piece_size: usize, pieces: &[u8]) -> Fallibl
     Ok(())
 }
 
-fn render_torrent(torrent: &Torrent) -> Fallible<()> {
+fn render_torrent(torrent: &Torrent) -> Result<()> {
     // Each piece is a 160-bit SHA-1 hash
     let count = torrent.info.pieces.chunks(20).count();
     println!("piece buffer length: {}", torrent.info.pieces.len());
@@ -426,7 +429,7 @@ fn render_torrent(torrent: &Torrent) -> Fallible<()> {
     Ok(())
 }
 
-fn check_torrent_file(path: &str, should_check: bool) -> Fallible<()> {
+fn check_torrent_file(path: &str, should_check: bool) -> Result<()> {
     let buffer = fs::read(path).context("Failed to read torrent file")?;
     let torrent = de::from_bytes::<Torrent>(&buffer)?;
 
@@ -464,27 +467,13 @@ fn main() {
 
     if let Err(e) = check_torrent_file(torrent_file, should_check) {
         eprintln!("An error occurred while checking '{}':", torrent_file);
-        eprintln!("  {}", e);
-        eprintln!();
-
-        for cause in e.iter_causes() {
-            eprintln!("Caused by: {}", cause);
-        }
-
-        if let Some(backtrace) = e.as_fail().backtrace() {
-            eprintln!();
-            eprintln!("Backtrace:");
-            eprintln!("{}", backtrace);
-        }
+        eprintln!("  {:?}", e);
     }
 
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
 
-        let _ = Command::new("cmd.exe")
-            .arg("/c")
-            .arg("pause")
-            .status();
+        let _ = Command::new("cmd.exe").arg("/c").arg("pause").status();
     }
 }
