@@ -94,6 +94,8 @@ struct File {
 
 #[derive(Deserialize)]
 struct Info {
+    #[serde(default)]
+    length: Option<i64>,
     name: String,
     pieces: ByteBuf,
     #[serde(rename = "piece length")]
@@ -516,6 +518,7 @@ fn check_torrent_file(
     let torrent = de::from_bytes::<Torrent>(&buffer)?;
 
     println!("name:\t\t{}", torrent.info.name);
+    println!("length:\t\t{:?}", torrent.info.length);
     println!("creation date:\t{:?}", torrent.creation_date);
     println!("comment:\t{:?}", torrent.comment);
     println!("created by:\t{:?}", torrent.created_by);
@@ -534,9 +537,9 @@ fn check_torrent_file(
     println!("piece buffer length: {}", torrent.info.pieces.len());
     println!("pieces count:        {}", count);
 
-    if let &Some(ref files) = &torrent.info.files {
-        let piece_size = torrent.info.piece_length as usize;
+    let piece_size = torrent.info.piece_length as usize;
 
+    if let &Some(ref files) = &torrent.info.files {
         extra_files_check(files)?;
 
         let bad_files = files_existance_check(files)?;
@@ -548,6 +551,26 @@ fn check_torrent_file(
 
         files_hash_check(
             files,
+            piece_size,
+            &torrent.info.pieces,
+            &bad_files,
+            run_parallel,
+        )?;
+    } else if let Some(length) = torrent.info.length {
+        let files = [File {
+            path: vec![torrent.info.name],
+            length,
+        }];
+
+        let bad_files = files_existance_check(&files)?;
+
+        // Return early if there are bad file entries and bad files are not to be ignored
+        if !ignore_missing && !bad_files.is_empty() {
+            return Ok(());
+        }
+
+        files_hash_check(
+            &files,
             piece_size,
             &torrent.info.pieces,
             &bad_files,
